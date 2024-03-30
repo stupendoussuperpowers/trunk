@@ -12,19 +12,25 @@ TODO: ensuring linux support as well.
 
 # Usage
 
-Added feature for "sieving". Will follow for file changes -
+Added feature for "sieving". Will follow for file changes
+
 `trunk -s <filter> /path/to/file`
 
-Usual tail commands are compatible -
+Usual tail commands are compatible
+
 `trunk -n <number of lines> /path/to/file`
+
 `trunk -f /path/to/file`
 
 .
-.
+
 .
 
-`trunk -h` -
+.
 
+`trunk -h`
+
+```
 Usage: trunk.exe [OPTIONS] <FILE>
 
 Arguments:
@@ -36,6 +42,7 @@ Options:
 -n, --num-lines <NUM_LINES> Number of lines from the end to tail [default: 5]
 -h, --help Print help
 -V, --version Print version
+```
 
 # Building
 

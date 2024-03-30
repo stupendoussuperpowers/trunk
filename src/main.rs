@@ -20,10 +20,19 @@ struct FileSpec {
 
 impl FileSpec {
     fn new(fpath: &'static Path) -> Self {
-        let size: u64 = fpath.size_on_disk().unwrap();
-        Self { fpath, size }
+        let size: u64 = 0;
+        let mut ret = Self { fpath, size };
+        ret.update_size();
+        ret
     }
 
+    // size_on_disk() wasn't returning actual file size for linux.
+    #[cfg(target_os = "linux")]
+    fn update_size(&mut self) {
+        self.size = self.fpath.metadata().unwrap().len();
+    }
+
+    #[cfg(target_os = "windows")]
     fn update_size(&mut self) {
         self.size = self.fpath.size_on_disk().unwrap();
     }
@@ -31,7 +40,6 @@ impl FileSpec {
 
 fn main() {
     let mut args = Args::parse();
-    println!("Args: {:#?}", args);
 
     let filepath = to_str(args.file);
     let sieve = to_str(args.sieve);
@@ -45,6 +53,9 @@ fn main() {
 
     let mut fspec = FileSpec::new(path);
 
+    let num = args.num_lines.parse::<i32>().unwrap();
+    read_last_n_lines(&mut fspec, num);
+
     if args.follow {
         let mut watcher = notify::recommended_watcher(move |res| match res {
             Ok(_event) => follow_filter(&mut fspec, sieve),
@@ -54,9 +65,6 @@ fn main() {
 
         watcher.watch(path, RecursiveMode::Recursive).unwrap();
         loop {}
-    } else {
-        let num = args.num_lines.parse::<i32>().unwrap();
-        read_last_n_lines(&mut fspec, num)
     }
 }
 
@@ -68,14 +76,17 @@ fn read_last_n_lines(file: &mut FileSpec, num: i32) {
         .open(file.fpath)
         .unwrap();
 
-    let mut start = 1;
-    while b_ns > 0 {
+    let mut start: u64 = 0;
+
+    // Stop when number of \n are met, or the file is completely read.
+    while b_ns > 0 && start < file.size {
         // Read one byte at a time until we reach the specified number of \n's (b_ns)
+        start = start + 1;
+
         f.seek(SeekFrom::Start(file.size - start)).unwrap();
+
         let mut buf = vec![0; 1];
         f.read_exact(&mut buf).unwrap();
-
-        start = start + 1;
 
         if from_utf8(&buf).unwrap() == "\n".to_string() {
             b_ns -= 1;
@@ -88,11 +99,11 @@ fn read_last_n_lines(file: &mut FileSpec, num: i32) {
     let mut buf_print = Vec::new();
     f.read_to_end(&mut buf_print).unwrap();
 
-    println!("{}", String::from_utf8(buf_print).unwrap());
+    print!("{}", String::from_utf8(buf_print).unwrap());
 }
 
 fn follow_filter(file: &mut FileSpec, filter: &str) {
-    if file.fpath.size_on_disk().unwrap() > file.size {
+    if file.fpath.metadata().unwrap().len() >= file.size {
         // Regular tail -f behaviour so far.
         let mut f = File::options()
             .read(true)
