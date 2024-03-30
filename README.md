@@ -2,7 +2,7 @@
 
 tail but filter when following.
 
-# Why?
+## Why?
 
 I need a small tool for work that would make it easy to filter `tail -f` outputs live. Decided to put one together.
 
@@ -10,7 +10,7 @@ Has only been tested on Windows so far.
 
 TODO: ensuring linux support as well.
 
-# Usage
+## Usage
 
 Added feature for "sieving". Will follow for file changes
 
@@ -22,11 +22,6 @@ Usual tail commands are compatible
 
 `trunk -f /path/to/file`
 
-.
-
-.
-
-.
 
 `trunk -h`
 
@@ -44,6 +39,6 @@ Options:
 -V, --version Print version
 ```
 
-# Building
+## Building
 
 `cargo build`
