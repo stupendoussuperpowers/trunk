@@ -4,11 +4,7 @@ tail but filter when following.
 
 ## Why?
 
-I need a small tool for work that would make it easy to filter `tail -f` outputs live. Decided to put one together.
-
-Has only been tested on Windows so far.
-
-TODO: ensuring linux support as well.
+I needed a small tool for work that would make it easy to filter `tail -f` outputs live. Decided to put one together.
 
 ## Usage
 
