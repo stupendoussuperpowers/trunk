@@ -27,7 +27,7 @@ impl FileSpec {
     }
 
     // size_on_disk() wasn't returning actual file size for linux.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn update_size(&mut self) {
         self.size = self.fpath.metadata().unwrap().len();
     }
