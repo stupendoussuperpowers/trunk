@@ -13,3 +13,5 @@ filesize = "0.2.0"
 notify = { version = "6.1.1" }
 static-str = "0.2.0"
 
+[profile.release]
+debug = true

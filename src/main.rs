@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, IsTerminal, Read, Seek, SeekFrom, Stdin},
+    io::{IsTerminal, Read, Seek, SeekFrom},
     path::Path,
     str::from_utf8,
 };
@@ -8,8 +8,6 @@ use std::{
 use clap::{arg, command, Parser};
 use colored::Colorize;
 use notify::{RecursiveMode, Watcher};
-
-// use filesize::PathExt;
 
 use static_str::to_str;
 
@@ -31,7 +29,6 @@ impl FileSpec {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn update_size(&mut self) {
         self.size = if self.fpath.is_some() {
-            println!("{:#?}", self.fpath.unwrap());
             self.fpath.unwrap().metadata().unwrap().len()
         } else {
             0
@@ -50,17 +47,19 @@ fn main() {
 
     let filepath = to_str(args.file);
 
-    let mut _stdin: Vec<String> = [].to_vec();
+    let path = if filepath != "" {
+        Some(Path::new(filepath))
+    } else {
+        None
+    };
 
     let input = std::io::stdin();
 
-    let stdin_lines: Option<Vec<String>>;
-
-    if !input.is_terminal() {
-        stdin_lines = Some(input.lines().collect::<Result<Vec<_>, _>>().unwrap());
+    let stdin_lines: Option<Vec<String>> = if !input.is_terminal() {
+        Some(input.lines().collect::<Result<Vec<_>, _>>().unwrap())
     } else {
-        stdin_lines = None;
-    }
+        None
+    };
 
     let sieve = to_str(args.sieve);
 
@@ -68,12 +67,6 @@ fn main() {
     if sieve != "" {
         args.follow = true;
     }
-
-    let path = if filepath != "" {
-        Some(Path::new(filepath))
-    } else {
-        None
-    };
 
     let mut fspec = FileSpec::new(path, stdin_lines);
 
@@ -138,9 +131,9 @@ fn read_last_n_lines(file: &mut FileSpec, num: i32) {
             if b_ns == 0 {
                 break;
             }
-        }
 
-        print!("{}", buf_print);
+            print!("{}", buf_print);
+        }
     }
 }
 
@@ -175,7 +168,7 @@ fn follow_filter(file: &mut FileSpec, filter: &str) {
         }
     } else {
         // Display message informing that the file size reduced since the last output. continue following new EOF
-        println!("***FILE TRUN'ED***");
+        println!("***FILE TRUNCATED: READING FROM NEW EOF***");
     }
 
     // update file.size after we are done printing/filtering
