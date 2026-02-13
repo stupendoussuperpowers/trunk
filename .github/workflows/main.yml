@@ -41,7 +41,7 @@ jobs:
       - name: Upload artifact + attestation
         uses: actions/upload-artifact@v4
         with:
-          name: tail-${{ github.ref_name }}
+          name: trunk-${{ github.ref_name }}
           path: |
-            target/release/tail
+            target/release/trunk
             attestation.json
