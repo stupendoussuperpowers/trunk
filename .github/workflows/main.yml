@@ -45,3 +45,10 @@ jobs:
           path: |
             target/release/trunk
             attestation.json
+            
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/tail
+            attestation.json
