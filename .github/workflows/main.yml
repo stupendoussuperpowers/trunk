@@ -7,7 +7,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write 
 
 jobs:
   test:
@@ -45,10 +45,14 @@ jobs:
           path: |
             target/release/trunk
             attestation.json
-            
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
           files: |
             target/release/trunk
             attestation.json
