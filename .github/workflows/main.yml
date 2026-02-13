@@ -1,0 +1,47 @@
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: cargo test
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Attest build with Witness
+        uses: testifysec/witness-run-action@v0.3.3
+        with:
+          step: build
+          attestations: "git github environment"
+          enable-sigstore: true
+          enable-archivista: false
+          outfile: attestation.json
+          command: cargo build --release
+
+      - name: Upload artifact + attestation
+        uses: actions/upload-artifact@v4
+        with:
+          name: tail-${{ github.ref_name }}
+          path: |
+            target/release/tail
+            attestation.json
