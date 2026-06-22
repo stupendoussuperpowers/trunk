@@ -28,23 +28,22 @@ jobs:
       - name: Build
         run: cargo build --release
 
-      - name: Attest build with Witness
-        uses: testifysec/witness-run-action@v0.3.3
+      - name: Generate SBOMit SBOM
+        uses: Marc-cn/sbomit-pipeline@main
         with:
-          step: build
-          attestations: "git github environment"
-          enable-sigstore: true
-          enable-archivista: false
-          outfile: attestation.json
           command: cargo build --release
+          checkout: false
+          artifact_name: sbomit-${{ github.sha }}
 
-      - name: Upload artifact + attestation
+      - name: Upload artifact + SBOM
         uses: actions/upload-artifact@v4
         with:
           name: trunk-${{ github.ref_name }}
           path: |
             target/release/trunk
             attestation.json
+            sbom/sbom.spdx.json
+            sbom/sbom.cdx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -56,3 +55,4 @@ jobs:
           files: |
             target/release/trunk
             attestation.json
+            sbom/sbom.spdx.json
