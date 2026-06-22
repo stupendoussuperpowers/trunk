@@ -25,9 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build
-        run: cargo build --release
-
       - name: Generate SBOMit SBOM
         uses: Marc-cn/sbomit-pipeline@main
         with:
