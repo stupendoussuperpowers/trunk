@@ -1,0 +1,146 @@
+# Investigates witness's "command-run eBPF trace missing pending open" error
+# on hosted runners. Run manually from the Actions tab; logs and an artifact
+# per runner image are produced. Compare ubuntu-24.04 (kernel 7) against
+# ubuntu-22.04.
+name: ebpf-debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-command:
+        description: Command to trace
+        default: cargo build --release
+      clean-command:
+        description: Command run before each traced build so it does real work
+        default: cargo clean
+      witness-repo:
+        default: in-toto/witness
+      witness-ref:
+        default: main
+      go-witness-repo:
+        default: in-toto/go-witness
+      go-witness-ref:
+        default: main
+
+jobs:
+  debug:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      OUT: ${{ github.workspace }}/../ebpf-debug-out
+      BUILD: ${{ inputs.build-command }}
+      CLEAN: ${{ inputs.clean-command }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          mkdir -p "$OUT"
+          {
+            set -x
+            uname -a
+            cat /proc/cmdline
+            nproc; lscpu | head -20; free -m
+            grep -E 'PREEMPT|CONFIG_BPF_SYSCALL|CONFIG_FTRACE_SYSCALLS' /boot/config-$(uname -r) || true
+            sudo cat /sys/kernel/debug/sched/preempt || true
+            sysctl kernel.unprivileged_bpf_disabled kernel.bpf_stats_enabled || true
+            for e in sys_enter_openat sys_exit_openat sys_enter_openat2; do
+              sudo cat /sys/kernel/tracing/events/syscalls/$e/format || true
+            done
+          } 2>&1 | tee "$OUT/system.txt"
+
+      - name: Install bpftrace and bpftool
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bpftrace
+          sudo apt-get install -y -qq "linux-tools-$(uname -r)" || true
+          BPFTOOL=$(ls /usr/lib/linux-tools/*/bpftool 2>/dev/null | head -1)
+          if [ -z "$BPFTOOL" ]; then
+            curl -fsSL https://github.com/libbpf/bpftool/releases/download/v7.5.0/bpftool-v7.5.0-amd64.tar.gz \
+              | tar -xz -C "$RUNNER_TEMP"
+            chmod +x "$RUNNER_TEMP/bpftool"
+            BPFTOOL="$RUNNER_TEMP/bpftool"
+          fi
+          echo "BPFTOOL=$BPFTOOL" >> "$GITHUB_ENV"
+          bpftrace --version
+          sudo "$BPFTOOL" version
+
+      # Other BPF programs on syscall tracepoints (e.g. host monitoring agents)
+      # would share the CPU with witness's programs.
+      - name: Pre-existing BPF programs
+        run: |
+          {
+            sudo "$BPFTOOL" prog show
+            echo "--- perf/tracepoint attachments"
+            sudo "$BPFTOOL" perf list
+          } 2>&1 | tee "$OUT/preexisting-bpf.txt"
+
+      - name: Enter/exit pairing, cold cache
+        continue-on-error: true
+        run: bash .github/ebpf-debug/pair.sh cold
+
+      - name: Enter/exit pairing, warm cache
+        continue-on-error: true
+        run: bash .github/ebpf-debug/pair.sh warm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Build witness
+        run: |
+          cd "$RUNNER_TEMP"
+          git clone -q --depth 1 -b "${{ inputs.witness-ref }}" "https://github.com/${{ inputs.witness-repo }}" witness
+          git clone -q --depth 1 -b "${{ inputs.go-witness-ref }}" "https://github.com/${{ inputs.go-witness-repo }}" go-witness
+          git -C go-witness log -1 --oneline | tee "$OUT/go-witness-commit.txt"
+          cd witness
+          go mod edit -replace github.com/in-toto/go-witness=../go-witness
+          go mod tidy
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/witness-bin" ./main.go
+          openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/key.pem"
+
+      - name: Witness run, cold cache, with BPF stats
+        continue-on-error: true
+        run: |
+          sudo sysctl -w kernel.bpf_stats_enabled=1
+          eval "$CLEAN" >/dev/null 2>&1 || true
+          sync; echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
+
+          # witness can fail within ~100ms, so sample fast and keep every
+          # snapshot that shows its programs.
+          sudo bash -c '
+            while :; do
+              s=$("'"$BPFTOOL"'" prog show 2>/dev/null | grep -A3 -E "trace_open|trace_sched|trace_cgroup")
+              [ -n "$s" ] && printf "=== %s\n%s\n" "$(date +%T.%N)" "$s"
+              sleep 0.01
+            done' > "$OUT/bpftool-samples.txt" 2>&1 &
+          SAMPLER=$!
+
+          set +e
+          sudo env "PATH=$PATH" "HOME=$HOME" "$RUNNER_TEMP/witness-bin" run \
+            --step ebpf-debug \
+            --signer-file-key-path "$RUNNER_TEMP/key.pem" \
+            --outfile "$OUT/attestation.json" \
+            --trace --attestor-command-run-trace-backend ebpf \
+            -- bash -c "$BUILD" 2>&1 | tee "$OUT/witness.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+
+          sudo kill "$SAMPLER" 2>/dev/null || true
+          sudo pkill -f 'prog show' 2>/dev/null || true
+          echo "--- last bpftool samples (run_cnt enter vs exit, recursion_misses)"
+          tail -40 "$OUT/bpftool-samples.txt"
+          exit $rc
+
+      - name: Kernel log
+        if: always()
+        run: sudo dmesg | tail -100 | tee "$OUT/dmesg.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ebpf-debug-${{ matrix.os }}
+          path: ${{ github.workspace }}/../ebpf-debug-out
