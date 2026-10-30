@@ -28,9 +28,7 @@ jobs:
       - name: Generate SBOMit SBOM
         uses: Uk-jake/sbomit-pipeline-runner@main
         with:
-          command: cargo build --release
-          checkout: false
-          artifact_name: sbomit-${{ github.sha }}
+          build-command: cargo build --release
 
       - name: Upload artifact + SBOM
         uses: actions/upload-artifact@v4
