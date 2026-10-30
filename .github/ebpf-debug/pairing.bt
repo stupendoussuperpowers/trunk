@@ -3,9 +3,10 @@
 // whose sys_exit fired with no matching sys_enter (witness's
 // "missing pending open" condition).
 //
-// The same opens are also counted through raw_syscalls:sys_enter/sys_exit
-// (open=2, openat=257, openat2=437 on x86_64), per CPU, to see whether the
-// raw tracepoint loses enters too and whether losses depend on the CPU.
+// The same opens are also counted through raw_syscalls:sys_enter/sys_exit,
+// per CPU, to see whether the raw tracepoint loses enters too and whether
+// losses depend on the CPU. $1 $2 $3 are the open, openat and openat2 syscall
+// numbers for the arch (pair.sh passes them).
 
 tracepoint:sched:sched_process_exec
 {
@@ -35,15 +36,29 @@ tracepoint:syscalls:sys_exit_openat2
 }
 
 tracepoint:raw_syscalls:sys_enter
-/@tracked[pid] && (args->id == 2 || args->id == 257 || args->id == 437)/
+/@tracked[pid] && (args->id == $1 || args->id == $2 || args->id == $3)/
 {
 	@raw_enter[cpu] = count();
 }
 
 tracepoint:raw_syscalls:sys_exit
-/@tracked[pid] && (args->id == 2 || args->id == 257 || args->id == 437)/
+/@tracked[pid] && (args->id == $1 || args->id == $2 || args->id == $3)/
 {
 	@raw_exit[cpu] = count();
+}
+
+// A second syscall, to see whether the CPU-0-only enter loss is specific to
+// open* or hits every per-syscall enter tracepoint.
+tracepoint:syscalls:sys_enter_mmap
+/@tracked[pid]/
+{
+	@mmap_enter[cpu] = count();
+}
+
+tracepoint:syscalls:sys_exit_mmap
+/@tracked[pid]/
+{
+	@mmap_exit[cpu] = count();
 }
 
 END

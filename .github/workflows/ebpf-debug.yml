@@ -29,6 +29,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     env:
       # upload-artifact rejects paths containing '..'.
       OUT: ${{ github.workspace }}/ebpf-debug-out
@@ -83,32 +84,37 @@ jobs:
             done
           } 2>&1 | tee "$OUT/preexisting-bpf.txt"
 
+      # Same per-CPU enter/exit count through ftrace, with no BPF involved, to
+      # tell a broken syscall event from a broken perf/BPF hookup.
+      - name: Enter/exit per CPU via ftrace
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          T=/sys/kernel/tracing
+          sudo sh -c "echo 0 > $T/tracing_on; echo > $T/trace
+            echo 1 > $T/events/syscalls/sys_enter_openat/enable
+            echo 1 > $T/events/syscalls/sys_exit_openat/enable
+            echo 1 > $T/tracing_on"
+          seq 2000 | xargs -P 8 -I{} cat /etc/hostname >/dev/null
+          sudo sh -c "echo 0 > $T/tracing_on
+            echo 0 > $T/events/syscalls/sys_enter_openat/enable
+            echo 0 > $T/events/syscalls/sys_exit_openat/enable"
+          sudo cat $T/trace | awk '
+            match($0, /\[[0-9]+\]/) { c = substr($0, RSTART + 1, RLENGTH - 2) + 0 }
+            /sys_openat\(/ { enter[c]++ }
+            /sys_openat ->/ { exit_[c]++ }
+            END { for (c in exit_) printf "cpu %d: enter %d exit %d\n", c, enter[c], exit_[c] }
+          ' | sort | tee "$OUT/ftrace-percpu.txt"
+
       - name: Enter/exit pairing, cold cache
         continue-on-error: true
+        timeout-minutes: 10
         run: bash .github/ebpf-debug/pair.sh cold
 
       - name: Enter/exit pairing, warm cache
         continue-on-error: true
+        timeout-minutes: 10
         run: bash .github/ebpf-debug/pair.sh warm
-
-      # Repeat with the runner's own BPF users (e.g. the agent holding a
-      # sys_enter_mmap program) stopped, to see if they cause the loss.
-      - name: Enter/exit pairing, pre-existing BPF users stopped
-        continue-on-error: true
-        run: |
-          for p in $(sudo "$BPFTOOL" perf list | awk '{print $2}' | sort -u); do
-            unit=$(ps -o unit= -p "$p" | tr -d ' ')
-            echo "stopping pid $p (unit: ${unit:-none})"
-            if [ -n "$unit" ] && [ "${unit%.service}" != "$unit" ]; then
-              sudo systemctl stop "$unit" || sudo kill "$p"
-            else
-              sudo kill "$p"
-            fi
-          done
-          sleep 2
-          echo "--- remaining perf attachments"
-          sudo "$BPFTOOL" perf list
-          bash .github/ebpf-debug/pair.sh agent-stopped
 
       - uses: actions/setup-go@v5
         with:
