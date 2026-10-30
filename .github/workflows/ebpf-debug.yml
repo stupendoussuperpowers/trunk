@@ -30,7 +30,8 @@ jobs:
         os: [ubuntu-24.04, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     env:
-      OUT: ${{ github.workspace }}/../ebpf-debug-out
+      # upload-artifact rejects paths containing '..'.
+      OUT: ${{ github.workspace }}/ebpf-debug-out
       BUILD: ${{ inputs.build-command }}
       CLEAN: ${{ inputs.clean-command }}
     steps:
@@ -76,6 +77,10 @@ jobs:
             sudo "$BPFTOOL" prog show
             echo "--- perf/tracepoint attachments"
             sudo "$BPFTOOL" perf list
+            echo "--- owners"
+            for p in $(sudo "$BPFTOOL" perf list | awk '{print $2}' | sort -u); do
+              ps -o pid=,unit=,args= -p "$p" || true
+            done
           } 2>&1 | tee "$OUT/preexisting-bpf.txt"
 
       - name: Enter/exit pairing, cold cache
@@ -85,6 +90,25 @@ jobs:
       - name: Enter/exit pairing, warm cache
         continue-on-error: true
         run: bash .github/ebpf-debug/pair.sh warm
+
+      # Repeat with the runner's own BPF users (e.g. the agent holding a
+      # sys_enter_mmap program) stopped, to see if they cause the loss.
+      - name: Enter/exit pairing, pre-existing BPF users stopped
+        continue-on-error: true
+        run: |
+          for p in $(sudo "$BPFTOOL" perf list | awk '{print $2}' | sort -u); do
+            unit=$(ps -o unit= -p "$p" | tr -d ' ')
+            echo "stopping pid $p (unit: ${unit:-none})"
+            if [ -n "$unit" ] && [ "${unit%.service}" != "$unit" ]; then
+              sudo systemctl stop "$unit" || sudo kill "$p"
+            else
+              sudo kill "$p"
+            fi
+          done
+          sleep 2
+          echo "--- remaining perf attachments"
+          sudo "$BPFTOOL" perf list
+          bash .github/ebpf-debug/pair.sh agent-stopped
 
       - uses: actions/setup-go@v5
         with:
@@ -143,4 +167,4 @@ jobs:
         if: always()
         with:
           name: ebpf-debug-${{ matrix.os }}
-          path: ${{ github.workspace }}/../ebpf-debug-out
+          path: ${{ github.workspace }}/ebpf-debug-out

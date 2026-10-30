@@ -2,6 +2,10 @@
 // Tracks processes exec'd after attach and reports any successful open*
 // whose sys_exit fired with no matching sys_enter (witness's
 // "missing pending open" condition).
+//
+// The same opens are also counted through raw_syscalls:sys_enter/sys_exit
+// (open=2, openat=257, openat2=437 on x86_64), per CPU, to see whether the
+// raw tracepoint loses enters too and whether losses depend on the CPU.
 
 tracepoint:sched:sched_process_exec
 {
@@ -14,7 +18,7 @@ tracepoint:syscalls:sys_enter_openat2
 /@tracked[pid]/
 {
 	@pending[tid] = 1;
-	@enter = count();
+	@enter[cpu] = count();
 }
 
 tracepoint:syscalls:sys_exit_open,
@@ -22,12 +26,24 @@ tracepoint:syscalls:sys_exit_openat,
 tracepoint:syscalls:sys_exit_openat2
 /@tracked[pid]/
 {
-	@exit = count();
+	@exit[cpu] = count();
 	if (@pending[tid] == 0 && args->ret >= 0) {
 		@missing[comm] = count();
 		printf("MISSING pid=%d tid=%d comm=%s fd=%d\n", pid, tid, comm, args->ret);
 	}
 	delete(@pending[tid]);
+}
+
+tracepoint:raw_syscalls:sys_enter
+/@tracked[pid] && (args->id == 2 || args->id == 257 || args->id == 437)/
+{
+	@raw_enter[cpu] = count();
+}
+
+tracepoint:raw_syscalls:sys_exit
+/@tracked[pid] && (args->id == 2 || args->id == 257 || args->id == 437)/
+{
+	@raw_exit[cpu] = count();
 }
 
 END
